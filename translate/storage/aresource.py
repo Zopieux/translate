@@ -41,17 +41,16 @@ class AndroidResourceUnit(base.TranslationUnit):
 
     @classmethod
     def createfromxmlElement(cls, element):
-        term = None
-        # Actually this class supports only plurals and string tags
-        if element.tag == "plurals" or element.tag == "string":
-            term = cls(None, xmlelement=element)
-        return term
+        # This class supports only 'plurals', 'string-array' and 'string' tags
+        if element.tag in ("plurals", "string-array", "string"):
+            return cls(None, xmlelement=element)
 
     def __init__(self, source, empty=False, xmlelement=None, **kwargs):
         if xmlelement is not None:
             self.xmlelement = xmlelement
         else:
-            if self.hasplurals(source):
+            if self.is_multistring(source):
+                # Assume plurals since we lack any other hint.
                 self.xmlelement = etree.Element("plurals")
             else:
                 self.xmlelement = etree.Element("string")
@@ -347,54 +346,61 @@ class AndroidResourceUnit(base.TranslationUnit):
 
     @property
     def target(self):
-        if self.xmlelement.tag != "plurals":
-            return self.get_xml_text_value(self.xmlelement)
-        return multistring([data.forceunicode(self.get_xml_text_value(entry))
-                            for entry in self.xmlelement.iterchildren('item')])
+        if self.xmlelement.tag in ("string-array", "plurals"):
+            return multistring([data.forceunicode(self.get_xml_text_value(entry))
+                                for entry in self.xmlelement.iterchildren('item')])
+        return self.get_xml_text_value(self.xmlelement)
 
     @target.setter
     def target(self, target):
-        if self.hasplurals(self.source) or self.hasplurals(target):
+        if self.is_multistring(self.source) or self.is_multistring(target):
             # Fix the root tag if mismatching
-            if self.xmlelement.tag != "plurals":
+            if self.xmlelement.tag not in ("plurals", "string-array"):
                 old_id = self.getid()
+                # Assume 'plurals' since we lack any other hint.
                 self.xmlelement = etree.Element("plurals")
                 self.setid(old_id)
 
-            locale = self.gettargetlanguage().replace('_', '-').split('-')[0]
-            plural_tags = data.plural_tags.get(locale, data.plural_tags['en'])
+            is_plurals = self.xmlelement.tag == "plurals"
 
             # Get string list to handle, wrapping non multistring/list targets into a list.
             if isinstance(target, multistring):
-                plural_strings = target.strings
+                multi_strings = target.strings
             elif isinstance(target, list):
-                plural_strings = target
+                multi_strings = target
             else:
-                plural_strings = [target]
+                multi_strings = [target]
 
-            # Sync plural_strings elements to plural_tags count.
-            if len(plural_strings) < len(plural_tags):
-                plural_strings += [''] * (len(plural_tags) - len(plural_strings))
-            plural_strings = plural_strings[:len(plural_tags)]
+            plural_tags = [None] * len(multi_strings)
 
-            # Rebuild plurals.
+            if is_plurals:
+                locale = self.gettargetlanguage().replace('_', '-').split('-')[0]
+                plural_tags = data.plural_tags.get(locale, data.plural_tags['en'])
+
+                # Sync plural_strings elements to plural_tags count.
+                if len(multi_strings) < len(plural_tags):
+                    multi_strings += [''] * (len(plural_tags) - len(multi_strings))
+                multi_strings = multi_strings[:len(plural_tags)]
+
+                # Include "other" as copy of "many" if "other" is not present. This avoids crashes
+                # of Android builds with broken plurals handling.
+                if "other" not in plural_tags and "many" in plural_tags:
+                    # Create copy here to avoid modifications to language.data
+                    plural_tags.append("other")
+                    multi_strings.append(multi_strings[-1])
+
+            # Rebuild items.
             for entry in self.xmlelement.iterchildren():
                 self.xmlelement.remove(entry)
-
             self.xmlelement.text = "\n    "
 
-            # Include "other" as copy of "many" if "other" is not present. This avoids crashes
-            # of Android builts with broken plurals handling.
-            if "other" not in plural_tags and "many" in plural_tags:
-                # Create copy here to avoid modifications to laguage.data
-                plural_tags = plural_tags + ["other"]
-                plural_strings.append(plural_strings[-1])
-
-            for plural_tag, plural_string in zip(plural_tags, plural_strings):
+            for plural_tag, item_string in zip(plural_tags, multi_strings):
                 item = etree.Element("item")
-                item.set("quantity", plural_tag)
-                self.set_xml_text_value(plural_string, item)
+                if plural_tag is not None:
+                    item.set("quantity", plural_tag)
+                self.set_xml_text_value(item_string, item)
                 self.xmlelement.append(item)
+
         else:
             # Fix the root tag if mismatching
             if self.xmlelement.tag != "string":
@@ -446,7 +452,7 @@ class AndroidResourceUnit(base.TranslationUnit):
     def __eq__(self, other):
         return (str(self) == str(other))
 
-    def hasplurals(self, thing):
+    def is_multistring(self, thing):
         if isinstance(thing, multistring):
             return True
         elif isinstance(thing, list):

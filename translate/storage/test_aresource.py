@@ -353,6 +353,32 @@ class TestAndroidResourceUnit(test_monolingual.TestMonolingualUnit):
                '</plurals>\n')
         self.__check_parse(mString, xml)
 
+    def test_string_array(self):
+        mString = multistring(["foo bar", "another item"])
+        xml = ('<string-array name="testarray">\n'
+               '    <item>foo bar</item>\n'
+               '    <item>another item</item>\n'
+               '</string-array>')
+        self.__check_parse(mString, xml)
+
+    def test_string_array_with_newline(self):
+        mString = multistring(["foo\nbar", "another\nitem"])
+        xml = ('<string-array name="testarray">\n'
+               '    <item>foo\\nbar</item>\n'
+               '    <item>another\\nitem</item>\n'
+               '</string-array>')
+        self.__check_parse(mString, xml)
+
+    def test_string_array_with_comments(self):
+        mString = multistring(["foo bar", "another item"])
+        xml = ('<string-array name="testarray">\n'
+               '    <!-- comment of one string -->\n'
+               '    <item>foo bar</item>\n'
+               '    <!-- comment of other string -->\n'
+               '    <item>another item</item>\n'
+               '</string-array>')
+        self.__check_parse(mString, xml)
+
     def test_parse_html_quote(self):
         string = 'start \'here\' <b>html code \'to escape\'</b> also \'here\''
         xml = ('<string name="teststring">start \\\'here\\\' <b>html code \\\'to escape\\\'</b> also \\\'here\\\''
@@ -557,6 +583,25 @@ class TestAndroidResourceFile(test_monolingual.TestMonolingualStore):
         <item quantity="few"><xliff:g xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2" id="count">%d</xliff:g> dny</item>
         <item quantity="other"><xliff:g xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2" id="count">%d</xliff:g> dnu</item>
     </plurals>
+</resources>'''.encode('utf-8')
+        store = self.StoreClass()
+        store.targetlanguage = 'cs'
+        store.parse(content)
+        store.units[0].target = multistring([
+            '<xliff:g xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2" id="count">%d</xliff:g> den',
+            '<xliff:g xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2" id="count">%d</xliff:g> dny',
+            '<xliff:g xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2" id="count">%d</xliff:g> dnu',
+        ])
+        assert bytes(store) == content
+
+    def test_edit_string_array_markup(self):
+        content = '''<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="testarray">
+        <item><xliff:g xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2" id="count">%d</xliff:g> den</item>
+        <item><xliff:g xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2" id="count">%d</xliff:g> dny</item>
+        <item><xliff:g xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2" id="count">%d</xliff:g> dnu</item>
+    </string-array>
 </resources>'''.encode('utf-8')
         store = self.StoreClass()
         store.targetlanguage = 'cs'
